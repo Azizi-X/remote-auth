@@ -40,7 +40,7 @@ var (
 	ErrCaptchaRequired = errors.New("captcha required")
 )
 
-type RemoveOptions struct {
+type RemoteOptions struct {
 	OnFingerprint func(fingerprint string) error
 	OnExchange    func(token string) error
 }
@@ -58,7 +58,7 @@ type Remote struct {
 	dialer       *websocket.Dialer
 	headers      http.Header
 	heartbeatAck bool
-	opts         RemoveOptions
+	opts         RemoteOptions
 
 	Fingerprint string
 	Token       string
@@ -328,11 +328,11 @@ func (r *Remote) WithLogger(logger *debug.Logger) *Remote {
 	return r
 }
 
-func NewRemote(ctx context.Context, opts *RemoveOptions) *Remote {
+func NewRemote(ctx context.Context, opts *RemoteOptions) *Remote {
 	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 
 	if opts == nil {
-		opts = &RemoveOptions{}
+		opts = &RemoteOptions{}
 	}
 
 	return &Remote{
