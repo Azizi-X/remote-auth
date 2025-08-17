@@ -1,4 +1,4 @@
-module remote-auth
+module github.com/Azizi-X/remote-auth
 
 go 1.24.3
 
