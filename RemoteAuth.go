@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -35,6 +36,8 @@ var (
 		"user-agent":   []string{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord-ptb/1.0.1156 Chrome/134.0.6998.205 Electron/35.3.0 Safari/537.36"},
 		"content-type": []string{"application/json"},
 	}
+
+	ErrCaptchaRequired = errors.New("captcha required")
 )
 
 type RemoveOptions struct {
@@ -269,6 +272,13 @@ func (r *Remote) exchange(ticket string) (token string, err error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+
+	site_key, _ := jsonparser.GetString(body, "captcha_sitekey")
+
+	if resp.StatusCode == 400 && site_key != "" {
+		r.Verbose("[CAPTCHA] %d", resp.StatusCode)
+		return "", ErrCaptchaRequired
+	}
 
 	if resp.StatusCode != 200 {
 		return "", r.Verbose("status code: %d | %s", resp.StatusCode, string(body))
