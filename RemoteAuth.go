@@ -41,8 +41,8 @@ var (
 )
 
 type RemoveOptions struct {
-	OnFingerprint func(fingerprint string)
-	OnExchange    func(token string)
+	OnFingerprint func(fingerprint string) error
+	OnExchange    func(token string) error
 }
 
 type Remote struct {
@@ -233,7 +233,9 @@ func (r *Remote) Connect() error {
 			r.Fingerprint = fingerprint
 
 			if r.opts.OnFingerprint != nil {
-				r.opts.OnFingerprint(fingerprint)
+				if err := r.opts.OnFingerprint(fingerprint); err != nil {
+					return err
+				}
 			}
 
 		case "pending_login":
@@ -248,7 +250,9 @@ func (r *Remote) Connect() error {
 			r.Token = token
 
 			if r.opts.OnExchange != nil {
-				r.opts.OnExchange(token)
+				if err := r.opts.OnExchange(token); err != nil {
+					return err
+				}
 			}
 
 			return nil
