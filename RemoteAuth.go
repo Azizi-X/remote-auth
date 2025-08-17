@@ -46,19 +46,22 @@ type RemoveOptions struct {
 }
 
 type Remote struct {
-	*debug.Logger
+	logger       *debug.Logger
 	mu           sync.Mutex
 	ctx          context.Context
-	Interval     int64
-	Timeout      int64
-	PrivateKey   *rsa.PrivateKey
-	PkixBytes    []byte
-	Heartbeater  *time.Ticker
+	interval     int64
+	timeout      int64
+	privateKey   *rsa.PrivateKey
+	pkixBytes    []byte
+	heartbeater  *time.Ticker
 	conn         *websocket.Conn
 	dialer       *websocket.Dialer
 	headers      http.Header
 	heartbeatAck bool
-	Opts         RemoveOptions
+	opts         RemoveOptions
+
+	Fingerprint string
+	Token       string
 }
 
 func (r *Remote) WriteJSON(data any) error {
@@ -69,7 +72,7 @@ func (r *Remote) WriteJSON(data any) error {
 }
 
 func (r *Remote) cleanup() {
-	r.Heartbeater.Stop()
+	r.heartbeater.Stop()
 }
 
 func (r *Remote) sendHeartbeat() {
@@ -80,12 +83,12 @@ func (r *Remote) sendHeartbeat() {
 }
 
 func (r *Remote) newHeartbeater() {
-	r.Heartbeater = time.NewTicker(time.Duration(r.Interval) * time.Millisecond)
+	r.heartbeater = time.NewTicker(time.Duration(r.interval) * time.Millisecond)
 
 	go func() {
 		for {
 			select {
-			case <-r.Heartbeater.C:
+			case <-r.heartbeater.C:
 				r.sendHeartbeat()
 			case <-r.ctx.Done():
 				return
@@ -189,25 +192,25 @@ func (r *Remote) Connect() error {
 
 		switch op {
 		case "hello":
-			r.Interval, _ = jsonparser.GetInt(raw, "heartbeat_interval")
-			r.Timeout, _ = jsonparser.GetInt(raw, "timeout_ms")
+			r.interval, _ = jsonparser.GetInt(raw, "heartbeat_interval")
+			r.timeout, _ = jsonparser.GetInt(raw, "timeout_ms")
 
 			r.newHeartbeater()
 
-			r.PkixBytes, err = x509.MarshalPKIXPublicKey(&r.PrivateKey.PublicKey)
+			r.pkixBytes, err = x509.MarshalPKIXPublicKey(&r.privateKey.PublicKey)
 			if err != nil {
 				return err
 			}
 
 			r.WriteJSON(map[string]string{
 				"op":                 "init",
-				"encoded_public_key": base64.StdEncoding.EncodeToString(r.PkixBytes),
+				"encoded_public_key": base64.StdEncoding.EncodeToString(r.pkixBytes),
 			})
 		case "nonce_proof":
 			encrypted, _ := jsonparser.GetString(raw, "encrypted_nonce")
 			decoded, _ := base64.StdEncoding.DecodeString(encrypted)
 
-			nonce, _ := rsa.DecryptOAEP(sha256.New(), nil, r.PrivateKey, decoded, nil)
+			nonce, _ := rsa.DecryptOAEP(sha256.New(), nil, r.privateKey, decoded, nil)
 			nonceProof := base64.RawURLEncoding.EncodeToString(nonce)
 
 			r.WriteJSON(map[string]string{
@@ -217,7 +220,7 @@ func (r *Remote) Connect() error {
 		case "pending_remote_init":
 			fingerprint, _ := jsonparser.GetString(raw, "fingerprint")
 
-			hash := sha256.Sum256(r.PkixBytes)
+			hash := sha256.Sum256(r.pkixBytes)
 			pkixFingerprint := base64.RawURLEncoding.EncodeToString(hash[:])
 
 			if fingerprint != pkixFingerprint {
@@ -227,9 +230,12 @@ func (r *Remote) Connect() error {
 				}
 			}
 
-			if r.Opts.OnFingerprint != nil {
-				r.Opts.OnFingerprint(fingerprint)
+			r.Fingerprint = fingerprint
+
+			if r.opts.OnFingerprint != nil {
+				r.opts.OnFingerprint(fingerprint)
 			}
+
 		case "pending_login":
 			ticket, _ := jsonparser.GetString(raw, "ticket")
 
@@ -239,17 +245,19 @@ func (r *Remote) Connect() error {
 				return err
 			}
 
-			if r.Opts.OnExchange != nil {
-				r.Opts.OnExchange(token)
+			r.Token = token
+
+			if r.opts.OnExchange != nil {
+				r.opts.OnExchange(token)
 			}
 
-			return r.Verbose("[EXCHANGED]")
+			return nil
 		case "heartbeat_ack":
 			r.heartbeatAck = true
 		}
 	}
 
-	return r.Verbose("[DISCONNECTED]")
+	return nil
 }
 
 func (r *Remote) exchange(ticket string) (token string, err error) {
@@ -288,14 +296,14 @@ func (r *Remote) exchange(ticket string) (token string, err error) {
 
 	decoded, _ := base64.StdEncoding.DecodeString(encrypted)
 
-	decrypted, _ := rsa.DecryptOAEP(sha256.New(), nil, r.PrivateKey, decoded, nil)
+	decrypted, _ := rsa.DecryptOAEP(sha256.New(), nil, r.privateKey, decoded, nil)
 
 	return string(decrypted), nil
 }
 
 func (r *Remote) Verbose(msg string, formats ...any) error {
-	if r.Logger != nil {
-		return r.Logger.Verbose(msg, formats...)
+	if r.logger != nil {
+		return r.logger.Verbose(msg, formats...)
 	}
 
 	return fmt.Errorf(msg, formats...)
@@ -312,7 +320,7 @@ func (r *Remote) WithHeaders(headers http.Header) *Remote {
 }
 
 func (r *Remote) WithLogger(logger *debug.Logger) *Remote {
-	r.Logger = logger
+	r.logger = logger
 	return r
 }
 
@@ -325,7 +333,7 @@ func NewRemote(ctx context.Context, opts *RemoveOptions) *Remote {
 
 	return &Remote{
 		ctx:        ctx,
-		PrivateKey: privateKey,
-		Opts:       *opts,
+		privateKey: privateKey,
+		opts:       *opts,
 	}
 }
